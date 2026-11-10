@@ -65,7 +65,7 @@ func TestLoadRetention_names_the_bad_variable_and_never_prints_a_value(t *testin
 		"SERVICE_TOKEN":                   {"COMMERCIAL_RESERVATION_BASE_URL", "http://x:8083", "TENANT_IDS", tenantA},
 		"COMMERCIAL_RESERVATION_BASE_URL": {"SERVICE_TOKEN", "secret-token-value", "TENANT_IDS", tenantA},
 		"TENANT_IDS":                      {"SERVICE_TOKEN", "secret-token-value", "COMMERCIAL_RESERVATION_BASE_URL", "http://x:8083"},
-		"RETENTION_INTERVAL":                 with("RETENTION_INTERVAL", "soon"),
+		"RETENTION_INTERVAL":              with("RETENTION_INTERVAL", "soon"),
 	}
 	for name, pairs := range cases {
 		_, err := config.LoadRetention(env(pairs...))
