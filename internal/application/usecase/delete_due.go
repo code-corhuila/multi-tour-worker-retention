@@ -19,6 +19,7 @@ const maxPageSize = 100
 type DeleteDue struct {
 	reservations out.Reservations
 	tenants      []string
+	source       out.Tenants
 	log          *slog.Logger
 }
 
@@ -34,7 +35,11 @@ func (*DeleteDue) Name() string { return "retention" }
 
 // Run takes at most batch due reservations of each tenant, following the cursor of the list page by page. What does not fit waits for the next run.
 func (j *DeleteDue) Run(ctx context.Context, batch int) (processed, failed int) {
-	for _, tenant := range j.tenants {
+	tenants, ok := j.sweepTenants(ctx)
+	if !ok {
+		return 0, 1
+	}
+	for _, tenant := range tenants {
 		done, bad := j.sweep(ctx, tenant, batch)
 		processed, failed = processed+done, failed+bad
 	}
@@ -70,4 +75,24 @@ func (j *DeleteDue) delete(ctx context.Context, tenant, reservation string) erro
 	}
 	j.log.InfoContext(ctx, "sensitive data deletion answered", "tenantId", tenant, "reservationId", reservation, "outcome", outcome.Name)
 	return nil
+}
+
+// WithTenantSource lets the job ask for the tenants at each run when none are configured; TENANT_IDS stays the fallback and wins when set.
+func (j *DeleteDue) WithTenantSource(source out.Tenants) *DeleteDue {
+	j.source = source
+	return j
+}
+
+// sweepTenants is the configured list, or the active tenants of the service when there is none. A list that cannot be read counts as one
+// failure and sweeps nothing: the next run asks again.
+func (j *DeleteDue) sweepTenants(ctx context.Context) ([]string, bool) {
+	if len(j.tenants) > 0 || j.source == nil {
+		return j.tenants, true
+	}
+	ids, err := j.source.ListActive(ctx)
+	if err != nil {
+		j.log.WarnContext(ctx, "the active tenants could not be listed, the next run asks again", "error", err)
+		return nil, false
+	}
+	return ids, true
 }
