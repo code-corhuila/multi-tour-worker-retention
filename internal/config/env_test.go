@@ -95,9 +95,9 @@ func TestLoadRetention_refuses_a_base_url_with_a_path_or_credentials(t *testing.
 	}
 }
 
-// HU-WRK-001 DP-08: TENANT_IDS is optional. Empty means the tenants come from the service at each run; a malformed one still stops the worker.
+// Spec 001 D-09 (replaces HU-WRK-001 DP-08): TENANT_IDS is optional. Empty means the tenants come from the service at each run; a malformed one still stops the worker.
 func TestTenantIDs_empty_leaves_the_list_to_the_service(t *testing.T) {
-	got, err := config.LoadRetention(env("SERVICE_TOKEN", "secret-token-value", "COMMERCIAL_RESERVATION_BASE_URL", "http://x:8083", "TENANT_IDS", " "))
+	got, err := config.LoadRetention(env("SERVICE_TOKEN", "secret-token-value", "COMMERCIAL_RESERVATION_BASE_URL", "http://x:8083", "IDENTITY_AUDIT_BASE_URL", "http://y:8082", "TENANT_IDS", " "))
 
 	if err != nil || len(got.TenantIDs) != 0 {
 		t.Fatalf("got %v, %v", got.TenantIDs, err)
@@ -109,5 +109,29 @@ func TestTenantIDs_malformed_still_stops_the_worker_naming_the_variable(t *testi
 
 	if err == nil || !strings.Contains(err.Error(), "TENANT_IDS") {
 		t.Errorf("error = %v", err)
+	}
+}
+
+// Spec 001 AC-RT-01.9: the base URL of identity-audit is needed only when the tenants are asked for; a configured list does not need it.
+func TestLoadRetention_asks_for_the_base_url_of_identity_audit_only_when_the_tenants_are_not_listed(t *testing.T) {
+	noList := []string{"SERVICE_TOKEN", "secret-token-value", "COMMERCIAL_RESERVATION_BASE_URL", "http://commercial-reservation-api:8083"}
+	if _, err := config.LoadRetention(env(noList...)); err == nil || !strings.Contains(err.Error(), "IDENTITY_AUDIT_BASE_URL") {
+		t.Errorf("no list and no url: %v, want an error naming IDENTITY_AUDIT_BASE_URL", err)
+	}
+	got, err := config.LoadRetention(env(append(noList, "IDENTITY_AUDIT_BASE_URL", "http://identity-audit-api:8082/")...))
+	if err != nil || got.IdentityAuditURL != "http://identity-audit-api:8082" {
+		t.Errorf("no list and a url: %+v, %v", got, err)
+	}
+	if _, err := config.LoadRetention(env(required...)); err != nil {
+		t.Errorf("a configured list needs no url: %v", err)
+	}
+}
+
+func TestLoadRetention_refuses_a_bad_base_url_of_identity_audit_naming_it(t *testing.T) {
+	for _, bad := range []string{"ftp://x", "http://u:p@identity-audit-api:8082", "http://identity-audit-api:8082/api"} {
+		_, err := config.LoadRetention(env(with("IDENTITY_AUDIT_BASE_URL", bad)...))
+		if err == nil || !strings.Contains(err.Error(), "IDENTITY_AUDIT_BASE_URL") || strings.Contains(err.Error(), "p@") {
+			t.Errorf("%q: error %v, want it to name the variable and never its value", bad, err)
+		}
 	}
 }
