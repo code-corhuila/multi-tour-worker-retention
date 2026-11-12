@@ -21,7 +21,9 @@ type Retention struct {
 	Interval                 time.Duration
 	HealthAddr               string
 	CommercialReservationURL string
-	TenantIDs                []string
+	// IdentityAuditURL is where the tenants are asked for; needed only when TENANT_IDS is empty.
+	IdentityAuditURL string
+	TenantIDs        []string
 }
 
 // LoadRetention reads the variables through getenv. Anything missing or malformed stops the worker at start; an error names
@@ -46,11 +48,17 @@ func LoadRetention(getenv func(string) string) (Retention, error) {
 	if d.TenantIDs, err = tenantIDs(getenv("TENANT_IDS")); err != nil {
 		return Retention{}, err
 	}
+	// With a configured list the service is never asked, so its address is optional; if given, it is checked all the same.
+	if len(d.TenantIDs) == 0 || getenv("IDENTITY_AUDIT_BASE_URL") != "" {
+		if d.IdentityAuditURL, err = baseURL(getenv, "IDENTITY_AUDIT_BASE_URL"); err != nil {
+			return Retention{}, err
+		}
+	}
 	return d, nil
 }
 
-// tenantIDs reads the comma-separated list. It is optional: empty means the job asks commercial-reservation for the active tenants at each run
-// (HU-WRK-001 DP-08) and TENANT_IDS is the fallback. The ids go into URL paths, so each one must be a UUID.
+// tenantIDs reads the comma-separated list. It is optional: empty means the job asks identity-audit for the tenants at each run
+// (spec 001 D-09, which replaces HU-WRK-001 DP-08) and TENANT_IDS is the fallback. The ids go into URL paths, so each one must be a UUID.
 func tenantIDs(raw string) ([]string, error) {
 	var ids []string
 	if strings.TrimSpace(raw) == "" {
