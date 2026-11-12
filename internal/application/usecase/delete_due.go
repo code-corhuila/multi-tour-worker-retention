@@ -83,15 +83,15 @@ func (j *DeleteDue) WithTenantSource(source out.Tenants) *DeleteDue {
 	return j
 }
 
-// sweepTenants is the configured list, or the active tenants of the service when there is none. A list that cannot be read counts as one
+// sweepTenants is the configured list, or the tenants to sweep (active and inactive) of identity-audit when there is none. A list that cannot be read counts as one
 // failure and sweeps nothing: the next run asks again.
 func (j *DeleteDue) sweepTenants(ctx context.Context) ([]string, bool) {
 	if len(j.tenants) > 0 || j.source == nil {
 		return j.tenants, true
 	}
-	ids, err := j.source.ListActive(ctx)
+	ids, err := j.source.ListToSweep(ctx)
 	if err != nil {
-		j.log.WarnContext(ctx, "the active tenants could not be listed, the next run asks again", "error", err)
+		j.log.WarnContext(ctx, "the tenants could not be listed, the next run asks again", "error", err)
 		return nil, false
 	}
 	return ids, true
