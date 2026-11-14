@@ -46,7 +46,9 @@ func run() error {
 		httpclient.WithTimeout(cfg.Runtime.HTTPTimeout), httpclient.WithAttempts(cfg.Runtime.HTTPAttempts))
 	job := usecase.NewDeleteDue(reservationshttp.NewReservations(reservations), cfg.TenantIDs, log)
 	if len(cfg.TenantIDs) == 0 {
-		job.WithTenantSource(reservationshttp.NewTenants(reservations))
+		identityAudit := httpclient.New(cfg.IdentityAuditURL, cfg.Runtime.ServiceToken,
+			httpclient.WithTimeout(cfg.Runtime.HTTPTimeout), httpclient.WithAttempts(cfg.Runtime.HTTPAttempts))
+		job.WithTenantSource(reservationshttp.NewTenants(identityAudit))
 	}
 	jobRunner, err := runner.New(job, runner.Options{Interval: cfg.Interval, BatchSize: cfg.Runtime.BatchSize,
 		RunTimeout: cfg.Runtime.RunTimeout, Logger: log})

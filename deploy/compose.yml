@@ -11,7 +11,9 @@ services:
       SERVICE_TOKEN: ${WORKER_RETENTION_SERVICE_TOKEN:?WORKER_RETENTION_SERVICE_TOKEN is required, set it in env/<environment>.env}
       # No default: a wrong guess of a service name or port must fail visibly.
       COMMERCIAL_RESERVATION_BASE_URL: ${COMMERCIAL_RESERVATION_BASE_URL:?COMMERCIAL_RESERVATION_BASE_URL is required, e.g. http://commercial-reservation-api:8083}
-      # The tenants to sweep: no service route lists them yet (see README).
+      # Where the tenants are asked for when TENANT_IDS is empty (identity-audit lists them with their status; the inactive ones are swept too).
+      IDENTITY_AUDIT_BASE_URL: ${IDENTITY_AUDIT_BASE_URL:-http://identity-audit-api:8082}
+      # The tenants to sweep, as a fallback that wins when set.
       TENANT_IDS: ${TENANT_IDS:-}
       RETENTION_INTERVAL: ${RETENTION_INTERVAL:-24h}
       BATCH_SIZE: ${BATCH_SIZE:-100}
