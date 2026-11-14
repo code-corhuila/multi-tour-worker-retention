@@ -12,7 +12,7 @@ type tenantSource struct {
 	calls int
 }
 
-func (s *tenantSource) ListActive(context.Context) ([]string, error) {
+func (s *tenantSource) ListToSweep(context.Context) ([]string, error) {
 	s.calls++
 	return s.ids, s.err
 }

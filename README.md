@@ -26,7 +26,7 @@ Full policy: `00-governance/branching-policy.md` in `multi-tour-docs`.
 
 ## What it does
 
-Job 6 of the platform, once a day (`RETENTION_INTERVAL`, 24 hours by default): per tenant it asks `commercial-reservation` for the
+Job 6 of the platform, once a day (`RETENTION_INTERVAL`, 24 hours by default): per tenant (the active and the inactive ones, read from `identity-audit` unless `TENANT_IDS` is set) it asks `commercial-reservation` for the
 reservations whose sensitive data is more than a year old and asks it to delete each one. The service decides what is due and
 deletes; the job holds no retention rule. It reads its configuration from the environment (`.env.example`) and a bad value stops it
 at start. The technical purge of other domains is not done here (declared debt).
