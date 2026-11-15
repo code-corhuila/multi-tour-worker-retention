@@ -1,0 +1,137 @@
+package config_test
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/code-corhuila/multi-tour-worker-retention/internal/config"
+)
+
+const (
+	tenantA = "11111111-1111-4111-8111-111111111111"
+	tenantB = "22222222-2222-4222-8222-222222222222"
+)
+
+func env(pairs ...string) func(string) string {
+	m := map[string]string{}
+	for i := 0; i < len(pairs); i += 2 {
+		m[pairs[i]] = pairs[i+1]
+	}
+	return func(k string) string { return m[k] }
+}
+
+var required = []string{
+	"SERVICE_TOKEN", "secret-token-value",
+	"COMMERCIAL_RESERVATION_BASE_URL", "http://commercial-reservation-api:8083/",
+	"TENANT_IDS", tenantA,
+}
+
+func with(extra ...string) []string { return append(append([]string{}, required...), extra...) }
+
+// HU-WRK-006: once a day is the default interval (ADR-004 D10), and the shared runtime variables travel with it.
+func TestLoadRetention_applies_the_declared_defaults(t *testing.T) {
+	got, err := config.LoadRetention(env(required...))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Interval != 24*time.Hour || got.HealthAddr != ":8080" || got.Runtime.BatchSize != 100 {
+		t.Errorf("defaults = %+v", got)
+	}
+	if got.CommercialReservationURL != "http://commercial-reservation-api:8083" {
+		t.Errorf("url = %q, the trailing slash should go", got.CommercialReservationURL)
+	}
+}
+
+func TestLoadRetention_reads_its_own_variables_and_the_tenant_list_without_repeats(t *testing.T) {
+	got, err := config.LoadRetention(env(with("RETENTION_INTERVAL", "30s", "HEALTH_ADDR", ":9090",
+		"TENANT_IDS", tenantA+" , "+tenantB+","+tenantA)...))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Interval != 30*time.Second || got.HealthAddr != ":9090" {
+		t.Errorf("got %+v", got)
+	}
+	if len(got.TenantIDs) != 2 || got.TenantIDs[0] != tenantA || got.TenantIDs[1] != tenantB {
+		t.Errorf("tenants = %v, want the two ids once each in order", got.TenantIDs)
+	}
+}
+
+// A missing or malformed variable stops the worker with its name, never its value.
+func TestLoadRetention_names_the_bad_variable_and_never_prints_a_value(t *testing.T) {
+	cases := map[string][]string{
+		"SERVICE_TOKEN":                   {"COMMERCIAL_RESERVATION_BASE_URL", "http://x:8083", "TENANT_IDS", tenantA},
+		"COMMERCIAL_RESERVATION_BASE_URL": {"SERVICE_TOKEN", "secret-token-value", "TENANT_IDS", tenantA},
+		"RETENTION_INTERVAL":              with("RETENTION_INTERVAL", "soon"),
+	}
+	for name, pairs := range cases {
+		_, err := config.LoadRetention(env(pairs...))
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: error = %v, want one that names the variable", name, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "secret-token-value") {
+			t.Errorf("%s: the error prints a secret: %v", name, err)
+		}
+	}
+}
+
+// The tenant id goes into a URL path, so anything that is not a UUID is refused at start.
+func TestLoadRetention_refuses_a_tenant_that_is_not_a_uuid(t *testing.T) {
+	for _, bad := range []string{"acme", tenantA + "/../x", tenantA + ",", "../" + tenantA} {
+		if _, err := config.LoadRetention(env(with("TENANT_IDS", bad)...)); err == nil || !strings.Contains(err.Error(), "TENANT_IDS") {
+			t.Errorf("TENANT_IDS=%q: error = %v, want a refusal that names it", bad, err)
+		}
+	}
+}
+
+func TestLoadRetention_refuses_a_base_url_with_a_path_or_credentials(t *testing.T) {
+	for _, bad := range []string{"http://user:pw@host:8083", "http://host:8083/api", "ftp://host", "http://host:8083?x=1"} {
+		if _, err := config.LoadRetention(env(with("COMMERCIAL_RESERVATION_BASE_URL", bad)...)); err == nil {
+			t.Errorf("url %q was accepted", bad)
+		}
+	}
+}
+
+// Spec 001 D-09 (replaces HU-WRK-001 DP-08): TENANT_IDS is optional. Empty means the tenants come from the service at each run; a malformed one still stops the worker.
+func TestTenantIDs_empty_leaves_the_list_to_the_service(t *testing.T) {
+	got, err := config.LoadRetention(env("SERVICE_TOKEN", "secret-token-value", "COMMERCIAL_RESERVATION_BASE_URL", "http://x:8083", "IDENTITY_AUDIT_BASE_URL", "http://y:8082", "TENANT_IDS", " "))
+
+	if err != nil || len(got.TenantIDs) != 0 {
+		t.Fatalf("got %v, %v", got.TenantIDs, err)
+	}
+}
+
+func TestTenantIDs_malformed_still_stops_the_worker_naming_the_variable(t *testing.T) {
+	_, err := config.LoadRetention(env(with("TENANT_IDS", "not-a-uuid")...))
+
+	if err == nil || !strings.Contains(err.Error(), "TENANT_IDS") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// Spec 001 AC-RT-01.9: the base URL of identity-audit is needed only when the tenants are asked for; a configured list does not need it.
+func TestLoadRetention_asks_for_the_base_url_of_identity_audit_only_when_the_tenants_are_not_listed(t *testing.T) {
+	noList := []string{"SERVICE_TOKEN", "secret-token-value", "COMMERCIAL_RESERVATION_BASE_URL", "http://commercial-reservation-api:8083"}
+	if _, err := config.LoadRetention(env(noList...)); err == nil || !strings.Contains(err.Error(), "IDENTITY_AUDIT_BASE_URL") {
+		t.Errorf("no list and no url: %v, want an error naming IDENTITY_AUDIT_BASE_URL", err)
+	}
+	got, err := config.LoadRetention(env(append(noList, "IDENTITY_AUDIT_BASE_URL", "http://identity-audit-api:8082/")...))
+	if err != nil || got.IdentityAuditURL != "http://identity-audit-api:8082" {
+		t.Errorf("no list and a url: %+v, %v", got, err)
+	}
+	if _, err := config.LoadRetention(env(required...)); err != nil {
+		t.Errorf("a configured list needs no url: %v", err)
+	}
+}
+
+func TestLoadRetention_refuses_a_bad_base_url_of_identity_audit_naming_it(t *testing.T) {
+	for _, bad := range []string{"ftp://x", "http://u:p@identity-audit-api:8082", "http://identity-audit-api:8082/api"} {
+		_, err := config.LoadRetention(env(with("IDENTITY_AUDIT_BASE_URL", bad)...))
+		if err == nil || !strings.Contains(err.Error(), "IDENTITY_AUDIT_BASE_URL") || strings.Contains(err.Error(), "p@") {
+			t.Errorf("%q: error %v, want it to name the variable and never its value", bad, err)
+		}
+	}
+}
